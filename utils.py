@@ -3,7 +3,6 @@ from typing import Tuple, List, Dict
 import math
 import time
 from typing import Tuple
-import mavlink
 from pymavlink import mavutil
 
 wgs84 = CRS("EPSG:4326")  # WGS84
@@ -13,7 +12,7 @@ xyz_to_lla_transformer = Transformer.from_crs(turef30, wgs84, always_xy=True)
 
 
 def lla_to_xyz(
-    self, latitude: float, longitude: float, altitude: float
+    latitude: float, longitude: float, altitude: float
 ) -> Tuple[float, float, float]:
     """
     Converts latitude, longitude, and altitude to XYZ coordinates.
@@ -37,7 +36,7 @@ def lla_to_xyz(
     return x, y, z
 
 
-def xyz_to_lla(self, x: float, y: float, z: float) -> Tuple[float, float, float]:
+def xyz_to_lla(x: float, y: float, z: float) -> Tuple[float, float, float]:
     """
     Converts XYZ coordinates to latitude, longitude, and altitude.
     Uses TUREF30 and WGS84 coordinate systems for the conversion.
@@ -58,7 +57,6 @@ def xyz_to_lla(self, x: float, y: float, z: float) -> Tuple[float, float, float]
     """
     longitude, latitude, altitude = xyz_to_lla_transformer.transform(x, y, z)
     return latitude, longitude, altitude
-
 
 
 def send_position_target_global_int(
@@ -106,6 +104,7 @@ def send_position_target_global_int(
             yaw_rate,  # yaw, yaw_rate (not used)
         )
     )
+
 
 def calculate_average_coordinates(
     xyz_coords: List[Tuple[float, float, float]]
