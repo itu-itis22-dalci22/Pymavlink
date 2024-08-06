@@ -9,24 +9,6 @@ def list_serial_ports():
     available_ports = [port.device for port in ports]
     return available_ports
 
-
-def set_mode(drone: mavutil.mavlink_connection, mode: str) -> None:
-    """
-    Set the flight mode of the drone.
-    """
-    if mode not in drone.mode_mapping():
-        print(f"Unknown mode: {mode}")
-        print(f"Available modes: {list(drone.mode_mapping().keys())}")
-        return
-
-    mode_id = drone.mode_mapping()[mode]
-    drone.mav.set_mode_send(
-        drone.target_system,
-        mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-        mode_id,
-    )
-
-
 def main():
     print("Available serial ports:")
     ports = list_serial_ports()
