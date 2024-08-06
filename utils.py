@@ -121,4 +121,4 @@ def calculate_average_coordinates(
     avg_x = sum(coord[0] for coord in xyz_coords) / len(xyz_coords)
     avg_y = sum(coord[1] for coord in xyz_coords) / len(xyz_coords)
     avg_z = sum(coord[2] for coord in xyz_coords) / len(xyz_coords)
-    return avg_x, avg_y, avg_z
+    return (avg_x, avg_y, avg_z)
