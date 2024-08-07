@@ -13,6 +13,10 @@ def main():
     print("Available serial ports:")
     ports = list_serial_ports()
     baud_rate = 57600
+    if not ports:
+        print("No available serial ports found. Exiting...")
+        return
+
     for i, port in enumerate(ports):
         print(f"{i}: {port}")
 
@@ -23,7 +27,7 @@ def main():
         selected_ports = [
             ports[int(index.strip())] for index in selected_ports.split(",")
         ]
-    except (ValueError, IndexError) as e:
+    except (ValueError, IndexError):
         print("Invalid port index. Please enter valid indices separated by commas.")
         return
 
@@ -62,22 +66,35 @@ def main():
                             break
                         time.sleep(1)  # Update every second
 
-                except ValueError:
-                    print("Invalid altitude. Please enter a numeric value.")
+                except Exception as e:
+                    print(f"Error during takeoff: {e}")
+                    print("Attempting to land drones...")
+                    try:
+                        helper.land_drones()
+                    except Exception as e:
+                        print(f"Error during emergency landing: {e}")
 
             elif command == "land":
-                helper.land_drones()
+                try:
+                    helper.land_drones()
+                except Exception as e:
+                    print(f"Error during landing: {e}")
+                    print("Attempting to continue landing...")
 
                 # Monitor each drone's altitude for disarming
                 for i in range(drone_count):
-                    while True:
-                        current_altitude = helper.get_current_state()[i][2]
-                        print(f"Drone {i} altitude: {current_altitude:.2f} meters")
-                        if (
-                            current_altitude < 1
-                        ):  # Assuming landing is complete when below 1 meter
-                            break
-                        time.sleep(1)  # Update every second
+                    try:
+                        while True:
+                            current_altitude = helper.get_current_state()[i][2]
+                            print(f"Drone {i} altitude: {current_altitude:.2f} meters")
+                            if current_altitude < 1:
+                                print(f"Drone {i} has landed successfully.")
+                                break
+                            time.sleep(1)  # Update every second
+                    except Exception as e:
+                        print(f"Error monitoring altitude for Drone {i}: {e}")
+                        print("Continuing to monitor other drones...")
+
             elif command == "move":
                 coords_input = input(
                     "Enter the target coordinates for each drone (format: x,y,z; x,y,z; ...): "
@@ -112,17 +129,24 @@ def main():
                             .lower()
                         )
                         if land_command == "yes":
-                            helper.land_drones()
+                            try:
+                                helper.land_drones()
+                            except Exception as e:
+                                print(f"Error during landing: {e}")
+                                print("Attempting to continue landing...")
                             break
                         elif land_command == "no":
                             pass
                         else:
                             print("Please enter 'yes' or 'no'.")
 
-                except ValueError:
-                    print(
-                        "Invalid coordinates. Please enter coordinates in the format: x,y,z; x,y,z; ..."
-                    )
+                except Exception as e:
+                    print(f"Error during move operation: {e}")
+                    print("Attempting to land drones...")
+                    try:
+                        helper.land_drones()
+                    except Exception as e:
+                        print(f"Error during emergency landing: {e}")
 
             elif command == "quit":
                 break
@@ -138,7 +162,6 @@ def main():
     finally:
         # Ensure that connections are closed properly
         helper.close_environment()
-
 
 if __name__ == "__main__":
     main()
