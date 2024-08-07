@@ -131,7 +131,7 @@ class PyMavlinkHelper:
             vehicle.wait_heartbeat()
             self.vehicles.append(vehicle)
             time.sleep(0.1)
-            self._set_mode(vehicle, "GUIDED")
+            self._set_mode(vehicle, "LOITER")
 
         initial_coords = []
         for drone_index, _ in enumerate(self.vehicles):
@@ -340,6 +340,7 @@ class PyMavlinkHelper:
                 )
                 # Wait for ACK command
                 if self._ack_msg(vehicle, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM):
+                    self._set_mode(vehicle, "GUIDED")
                     print(f"Drone {i+1} armed")
                 else:
                     print(f"Failed to arm drone {i+1}")
@@ -607,7 +608,7 @@ class PyMavlinkHelper:
         Force disarms the vehicle.
         """
         # Send disarm command directly
-        set_parameter(vehicle, 'MOT_SAFE_DISARM', 1)
+        set_parameter(vehicle, "NOT_SAFE_DISARM", 1)
         vehicle.mav.command_long_send(
             vehicle.target_system,
             vehicle.target_component,
