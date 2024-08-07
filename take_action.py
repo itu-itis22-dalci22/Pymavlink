@@ -9,28 +9,6 @@ def list_serial_ports():
     return available_ports
 
 
-def prompt_disarm(helper: PyMavlinkHelper, drone_index):
-    """Function to prompt the user to disarm a specific drone."""
-    while True:
-        altitude = helper.get_current_state()[drone_index][2]
-        if altitude < 0.5:
-            print(f"Drone {drone_index}: Altitude is below 3 meters.")
-            disarm_command = (
-                input(f"Do you want to disarm drone {drone_index} now? (yes/no): ")
-                .strip()
-                .lower()
-            )
-            if disarm_command == "yes":
-                helper.close_environment()
-                print(f"Drone {drone_index} disarmed.")
-                break
-            elif disarm_command == "no":
-                print(f"Drone {drone_index} is not disarmed.")
-            else:
-                print("Please enter 'yes' or 'no'.")
-        time.sleep(3)  # Wait for 3 seconds before asking again
-
-
 def main():
     print("Available serial ports:")
     ports = list_serial_ports()
@@ -100,8 +78,6 @@ def main():
                         ):  # Assuming landing is complete when below 1 meter
                             break
                         time.sleep(1)  # Update every second
-                    prompt_disarm(helper, i)
-
             elif command == "move":
                 coords_input = input(
                     "Enter the target coordinates for each drone (format: x,y,z; x,y,z; ...): "
