@@ -150,3 +150,47 @@ def set_parameter(drone, param_id, param_value):
         if ack and ack.param_id == param_id:
             print(f"Parameter {param_id} set to {ack.param_value}")
             break
+
+
+def get_attitude(drone):
+    """
+    Get the attitude (roll, pitch, yaw) of the drone.
+
+    Args:
+        drone (mavutil.mavlink_connection): The MAVLink connection object.
+
+    Returns:
+        tuple: Roll, pitch, and yaw angles in degrees.
+    """
+    msg = drone.recv_match(type='ATTITUDE', blocking=True)
+    if msg:
+        roll = msg.roll * 180.0 / 3.14159265
+        pitch = msg.pitch * 180.0 / 3.14159265
+        yaw = msg.yaw * 180.0 / 3.14159265
+        return roll, pitch, yaw
+    return None, None, None
+
+
+def display_real_time_attitude(drone):
+    """
+    Display the real-time roll, pitch, and yaw angles of the drone.
+
+    Args:
+        drone (mavutil.mavlink_connection): The MAVLink connection object.
+    """
+    print("Displaying real-time roll, pitch, and yaw angles...")
+    try:
+        while True:
+            roll, pitch, yaw = get_attitude(drone)
+            if roll is not None:
+                print(f"Roll: {roll:.2f}°, Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("Exiting real-time attitude display.")
+        
+        
+# def main():
+#     xyz_cords, avg_x, avg_y, avg_z = connect_drones()
+    
+#     for drone in drones:
+#         display_real_time_attitude(drone)
