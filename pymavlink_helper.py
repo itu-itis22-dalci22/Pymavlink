@@ -556,7 +556,6 @@ class PyMavlinkHelper:
             lat, lon, alt = self._get_drone_coordinates(drone)
             x, y, z = lla_to_xyz(lat, lon, alt)
             xyz_coords.append((x, y, z))
-
         current_relative_coords = self._get_relative_position(xyz_coords)
 
         return current_relative_coords
@@ -595,12 +594,16 @@ class PyMavlinkHelper:
             Tuple[float, float, float]: The latitude, longitude, and altitude of the drone.
         """
         # Request GPS position
-        msg = drone.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+        msg = None
+        while msg is None:
+            msg = drone.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+            time.sleep(0.5)
         latitude = msg.lat / 1e7
         longitude = msg.lon / 1e7
         altitude = (
             msg.relative_alt / 1000.0
         )  # TODO check if relative_alt is correct for this implementation
+        
         return latitude, longitude, altitude
 
     def _force_disarm(self, vehicle):
