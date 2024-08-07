@@ -122,3 +122,31 @@ def calculate_average_coordinates(
     avg_y = sum(coord[1] for coord in xyz_coords) / len(xyz_coords)
     avg_z = sum(coord[2] for coord in xyz_coords) / len(xyz_coords)
     return (avg_x, avg_y, avg_z)
+
+
+def set_parameter(drone, param_id, param_value):
+    """
+    Set a parameter on the drone.
+
+    Args:
+        drone: MAVLink connection object.
+        param_id: The parameter id (name) as string.
+        param_value: The parameter value to set.
+
+    Returns:
+        None
+    """
+    drone.mav.param_set_send(
+        drone.target_system,
+        drone.target_component,
+        param_id.encode("utf-8"),  # Encode the parameter ID to bytes
+        float(param_value),
+        mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
+    )
+
+    # Wait for the parameter to be set
+    while True:
+        ack = drone.recv_match(type="PARAM_VALUE", blocking=True)
+        if ack and ack.param_id == param_id:
+            print(f"Parameter {param_id} set to {ack.param_value}")
+            break
