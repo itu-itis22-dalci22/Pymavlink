@@ -8,6 +8,7 @@ from utils import (
     xyz_to_lla,
     calculate_average_coordinates,
     send_position_target_global_int,
+    set_parameter,
 )
 import math
 import csv
@@ -606,6 +607,7 @@ class PyMavlinkHelper:
         Force disarms the vehicle.
         """
         # Send disarm command directly
+        set_parameter(vehicle, 'MOT_SAFE_DISARM', 1)
         vehicle.mav.command_long_send(
             vehicle.target_system,
             vehicle.target_component,
