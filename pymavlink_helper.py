@@ -9,6 +9,7 @@ from utils import (
     calculate_average_coordinates,
     send_position_target_global_int,
     set_parameter,
+    try_recv_match,
 )
 import math
 import csv
@@ -25,8 +26,6 @@ class PyMavlinkHelper:
         drone_count: int,
         connection_strings: List[str],
         baud_rate: int,
-        log_coords_file: str = "flight_coord_log.csv",
-        message_log_file: str = "message_log.csv",
     ) -> None:
         """
         Initializes the PyMavlinkHelper class.
@@ -39,52 +38,11 @@ class PyMavlinkHelper:
             List of connection strings for each drone.
         baud_rate (int):
             Baud rate for the connection.
-        log_coords_file (str):
-            The CSV file to log the flight data.
         """
         self.drone_count = drone_count
         self.connection_strings = connection_strings
         self.baud_rate = baud_rate
-        self.log_coords_file = log_coords_file
-        self.message_log_file = message_log_file
         self.vehicles = []
-        self.is_initialized_env = False
-
-    def _ack_msg(self, drone: mavutil.mavlink_connection, command: int) -> str:
-        """
-        Waits for and processes the ACK message for a given command.
-
-        Args:
-            drone (mavutil.mavlink_connection): The drone connection.
-            command (int): The MAVLink command to wait for ACK.
-
-        Returns:
-            str: The result of the command ('accepted', 'denied', 'in progress', 'failed', etc.).
-
-        Raises:
-            RuntimeError: If an error occurs while processing the ACK message.
-        """
-        try:
-            ack = None
-            while not ack:
-                ack = drone.recv_match(type="COMMAND_ACK", blocking=True)
-                if ack and ack.command == command:
-                    result = ack.result
-                    if result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-                        return "accepted"
-                    elif result == mavutil.mavlink.MAV_RESULT_DENIED:
-                        return "denied"
-                    elif result == mavutil.mavlink.MAV_RESULT_IN_PROGRESS:
-                        return "in progress"
-                    elif result == mavutil.mavlink.MAV_RESULT_FAILED:
-                        return "failed"
-                    else:
-                        return f"unknown result ({result})"
-        except AttributeError as e:
-            raise RuntimeError(f"Error processing ACK message: {e}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to receive ACK message: {e}")
-        return "no ack received"
 
     def _set_mode(self, drone: mavutil.mavlink_connection, mode: str) -> None:
         """
@@ -111,11 +69,26 @@ class PyMavlinkHelper:
 
         # Wait for ACK command
         # MAVLink requires an ACK from the drone to confirm the mode change
-        # Wait for ACK command
-        if self._ack_msg(drone, mavutil.mavlink.MAV_CMD_DO_SET_MODE):
-            print(f"Mode change to {mode} accepted")
-        else:
-            print(f"Mode change to {mode} failed")  # TODO assert exception here
+        ack = None
+        while not ack:
+            ack = try_recv_match(drone, message_name="COMMAND_ACK")
+            if ack:
+                try:
+                    ack_result = ack.result
+                    if ack.command == mavutil.mavlink.MAV_CMD_DO_SET_MODE:
+                        if ack_result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                            print(f"Mode change to {mode} accepted")
+                        else:
+                            print(
+                                f"Mode change to {mode} failed with result {ack_result}"  # TODO assert exception here
+                            )
+                        break
+                except AttributeError as e:
+                    print(
+                        f"Error processing ACK message: {e}"
+                    )  # TODO assert exception here
+            else:
+                print("No ACK received, retrying...")
 
     def initialize_environment(self) -> None:
         """
@@ -170,6 +143,7 @@ class PyMavlinkHelper:
                     coord_writer.writerow([timestamp, i + 1, x, y, z])
 
                 msg = drone.recv_match(blocking=True)
+
                 if msg:
                     message_type = msg.get_type()
                     message_content = str(
@@ -180,45 +154,6 @@ class PyMavlinkHelper:
                     )
 
                 time.sleep(1)  # Log data every second
-
-    def _get_relative_position(
-        self, current_positions: List[Tuple[float, float, float]]
-    ) -> List[Tuple[float, float, float]]:
-        """
-        Calculate and return the relative position of each drone from the origin.
-
-        Returns:
-            List[Tuple[float, float, float]]: A list of relative (x, y, z) positions for each drone.
-        """
-        relative_positions = []
-
-        if self.is_initialized_env == True:
-            for i, _ in enumerate(self.vehicles):
-                # Get the current absolute coordinates of the drone
-                # lat, lon, alt = self._get_drone_coordinates(drone)
-
-                # Convert the absolute coordinates to (x, y, z)
-                current_x, current_y, current_z = current_positions[i]
-
-                # Calculate the relative position from the origin
-                relative_x = current_x - self.origin[0]
-                relative_y = current_y - self.origin[1]
-                relative_z = current_z - self.origin[2]
-
-                # Append the relative position to the list
-                relative_positions.append((relative_x, relative_y, relative_z))
-        else:
-            for i, _ in enumerate(self.vehicles):
-                # Get the current absolute coordinates of the drone
-                # lat, lon, alt = self._get_drone_coordinates(drone)
-
-                # Convert the absolute coordinates to (x, y, z)
-                current_x, current_y, current_z = current_positions[i]
-
-                # Append the relative position to the list
-                relative_positions.append((current_x, current_y, current_z))
-
-        return relative_positions
 
     def get_smoothed_location(self, drone_index: int) -> Tuple[float, float, float]:
         """
@@ -283,15 +218,11 @@ class PyMavlinkHelper:
 
         return (avg_x, avg_y, avg_z)
 
+    ## TODO this function trying arm and if it is succeded return true. it is not actually checking.
     def _check_is_armed(self) -> List[bool]:
         """
         Checks if all the connected drones are armed.
-
-        Returns:
-            List[bool]: A list of booleans indicating the armed status of each drone.
-
-        Raises:
-            ValueError: If there is an error while checking the armed status for any drone.
+        TODO add Raises part to the function
         """
         armed_status = []
         for i, vehicle in enumerate(self.vehicles):
@@ -309,45 +240,66 @@ class PyMavlinkHelper:
                     0,
                     0,
                 )
-                ack_msg = vehicle.recv_match(type="COMMAND_ACK", blocking=True)
+                ack_msg = try_recv_match(vehicle, message_name="COMMAND_ACK")
                 is_armed = ack_msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED
-                print(f"Drone {i+1} armed: {is_armed}")
+                print(f"Drone {i+1} armed: {is_armed}")  # TODO
                 armed_status.append(is_armed)
             except Exception as e:
                 raise ValueError(f"Failed to check armed status for drone {i+1}: {e}")
 
         return armed_status
 
-    def _arm_drones(self):
+    def _arm_drone(self, vehicle_index: int):
         """
         Arms all the connected drones.
         """
-        for i, vehicle in enumerate(self.vehicles):
-            try:
-                print(f"Arming drone {i+1}...")
-                vehicle.mav.command_long_send(
-                    vehicle.target_system,
-                    vehicle.target_component,
-                    mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                )
-                # Wait for ACK command
-                if self._ack_msg(vehicle, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM):
-                    self._set_mode(vehicle, "GUIDED")
-                    print(f"Drone {i+1} armed")
-                else:
-                    print(f"Failed to arm drone {i+1}")
-            except Exception as e:
-                raise ValueError(f"Failed to arm drone {i+1}: {e}")
+        try:
+            print(f"Arming drone {vehicle_index+1}...")
+            vehicle = self.vehicles[vehicle_index]
 
-    def _takeoff(self, drone, target_altitude):
+            vehicle.mav.command_long_send(
+                vehicle.target_system,
+                vehicle.target_component,
+                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
+            ack_msg = try_recv_match(vehicle, message_name="COMMAND_ACK")
+            if ack_msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                self._set_mode(vehicle, "GUIDED")
+                print(f"Drone {vehicle_index+1} armed")
+            else:
+                print(f"Failed to arm drone {vehicle_index+1}")  # TODO assert exception
+        except Exception as e:
+            raise ValueError(f"Failed to arm drone {vehicle_index+1}: {e}")
+
+    def _arm_drones(self, vehicle_indices: list[int]):
+        """
+        Arms the drones corresponding to the provided list of vehicle indices using threads.
+
+        Parameters:
+        vehicle_indices (list[int]): List of indices of drones to arm.
+        """
+        threads = []
+
+        for i in vehicle_indices:
+            if 0 <= i < len(self.vehicles):
+                thread = threading.Thread(target=self._arm_drone, args=(i,))
+                threads.append(thread)
+                thread.start()
+            else:
+                print(f"Index {i} is out of range. Skipping...")
+
+        for thread in threads:
+            thread.join()
+
+    def _takeoff(self, drone: mavutil.mavlink_connection, target_altitude):
         """
         Command the drone to take off and wait until it reaches the target altitude.
 
@@ -355,7 +307,11 @@ class PyMavlinkHelper:
         drone: The drone instance to command.
         target_altitude (float): The altitude to reach in meters.
         """
+        if target_altitude <= 0:
+            return  # Do not proceed with takeoff if altitude is 0 or less
+
         print("Taking off...")
+
         drone.mav.command_long_send(
             drone.target_system,
             drone.target_component,
@@ -370,124 +326,109 @@ class PyMavlinkHelper:
             target_altitude,
         )
 
-        # Wait for ACK command
-        if self._ack_msg(drone, mavutil.mavlink.MAV_CMD_NAV_TAKEOFF):
-            print("Takeoff command accepted")
-        else:
-            print("Takeoff command failed")
-
         # Wait until the drone reaches the target altitude
         while True:
-            msg = drone.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+            msg = try_recv_match(drone, message_name="GLOBAL_POSITION_INT")
             altitude = msg.relative_alt / 1000.0  # altitude in meters
-            print(f"Current altitude: {altitude}")
+            print(f"Altitude: {altitude}")
             if altitude >= target_altitude * 0.95:  # 95% of target altitude
                 print("Reached target altitude")
                 break
-            time.sleep(0.5)
+            time.sleep(0.5)  # Wait before checking altitude again
 
-    def takeoff(self, target_altitude):
+    def takeoff(self, target_altitudes: list[int]):
+        """
+        Initiates takeoff for all drones to their respective target altitudes.
+        Spawns a thread for each drone to perform the takeoff concurrently.
+
+        Args:
+            target_altitudes (list[int]): List of target altitudes for each drone.
+
+        Raises:
+            ValueError: If the number of vehicles does not match the number of target altitudes.
+        """
+
+        # Check if the number of vehicles matches the number of target altitudes
+        if len(self.vehicles) != len(target_altitudes):
+            raise ValueError(
+                "The number of vehicles does not match the number of target altitudes."
+            )
+            return  # Exit the function after raising the exception
+
         threads = []
+
         for i, drone in enumerate(self.vehicles):
             try:
-                print(f"Taking off drone {i+1} to altitude {target_altitude}...")
+                print(f"Taking off drone {i+1} to altitude {target_altitudes[i]}...")
+                # Create a thread for each drone takeoff operation
                 t = threading.Thread(
-                    target=self._takeoff, args=(drone, target_altitude)
+                    target=self._takeoff, args=(drone, target_altitudes[i])
                 )
                 threads.append(t)
                 t.start()
             except Exception as e:
                 print(f"Failed to take off drone {i+1}: {e}")
 
+        # Wait for all threads to complete
         for t in threads:
-            t.join()
+            t.join()  # Ensure all takeoff operations complete before exiting the function
 
-    def land_drones(self, velocity: float, descent_rate: float) -> None:
+    def land_drones(self):
         """
-        Commands all drones to land simultaneously with specified velocity and descent rate.
+        Commands all drones to land simultaneously.
+        Spawns a thread for each drone to perform the landing concurrently.
+        """
+        threads = []
 
-        Parameters:
-        velocity (float): The velocity to set for landing (m/s).
-        descent_rate (float): The descent rate for landing (m/s^2).
-        """
         for i, vehicle in enumerate(self.vehicles):
-            print(f"Setting landing speed for drone {i+1}...")
-            vehicle.mav.command_long_send(
-                vehicle.target_system,
-                vehicle.target_component,
-                mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED,
-                0,
-                1,  # Airspeed
-                velocity,
-                0,
-                0,
-                0,
-                0,
-                0,
-            )
+            try:
+                print(f"Landing drone {i+1}...")
+                # Create a thread for each drone landing operation
+                t = threading.Thread(target=self._land_drone, args=(vehicle,))
+                threads.append(t)
+                t.start()
+            except Exception as e:
+                print(f"Failed to land drone {i+1}: {e}")
 
-            print(f"Setting descent rate for drone {i+1}...")
-            vehicle.mav.command_long_send(
-                vehicle.target_system,
-                vehicle.target_component,
-                mavutil.mavlink.MAV_CMD_DO_CHANGE_ALTITUDE,
-                0,
-                descent_rate,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            )
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()  # Ensure all landing operations complete before exiting the function"
 
-            print(f"Landing drone {i+1}...")
-            vehicle.mav.command_long_send(
-                vehicle.target_system,
-                vehicle.target_component,
-                mavutil.mavlink.MAV_CMD_NAV_LAND,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            )
+    def _land_drone(self, vehicle_index: int) -> None:
+        """
+        Commands all drones to land simultaneously.
+        """
 
-            # Wait for ACK command
-            if self._ack_msg(vehicle, mavutil.mavlink.MAV_CMD_NAV_LAND):
-                print(f"Landing command for drone {i+1} accepted")
-            else:
-                print(f"Landing command for drone {i+1} failed")
-
-        print("All drones commanded to land.")
+        vehicle = self.vehicles[vehicle_index]
+        print(f"Landing drone {vehicle_index+1}...")
+        vehicle.mav.command_long_send(
+            vehicle.target_system,
+            vehicle.target_component,
+            mavutil.mavlink.MAV_CMD_NAV_LAND,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        time.sleep(0.3)  # TODO check if the waiting time is too long
         while True:
-            all_landed = True
-            for vehicle in self.vehicles:
-                msg = vehicle.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
-                altitude = msg.relative_alt / 1000.0  # altitude in meters
-                if altitude > 0.1:
-                    all_landed = False
-            if all_landed:
-                print("All drones landed")
+            msg = try_recv_match(vehicle, message_name="GLOBAL_POSITION_INT")
+            altitude = msg.relative_alt / 1000.0  # altitude in meters
+            print(f"Drone {vehicle_index+1} Altitude:", altitude)
+            if altitude <= 0.3:
+                print(f"Drone {vehicle_index+1} Landed")
                 break
-            time.sleep(0.5)
+            time.sleep(1)  # TODO check if the waiting time is too long
 
-    def _check_battery(self) -> List[int]:
+    def _check_battery(
+        self,
+    ) -> List[int]:  # TODO state this implementation does not work in docstring
         """
         Checks the battery status of all connected drones.
-
-        Note:
-            This implementation does not work as expected. The battery status message
-            might not be received or parsed correctly.
-
-        Returns:
-            List[int]: A list of battery status messages for each drone.
-
-        Raises:
-            ValueError: If there is an error while checking the battery status for any drone.
         """
         battery_status = []
         for i, vehicle in enumerate(self.vehicles):
@@ -505,7 +446,7 @@ class PyMavlinkHelper:
                     0,
                     0,
                 )
-                battery_msg = vehicle.recv_match(type="BATTERY_STATUS", blocking=True)
+                battery_msg = try_recv_match(vehicle, message_name="BATTERY_STATUS")
                 print(f"Drone {i+1} battery status: {battery_msg}")
                 battery_status.append(battery_msg)
             except Exception as e:
@@ -556,29 +497,27 @@ class PyMavlinkHelper:
             lat, lon, alt = self._get_drone_coordinates(drone)
             x, y, z = lla_to_xyz(lat, lon, alt)
             xyz_coords.append((x, y, z))
-        current_relative_coords = self._get_relative_position(xyz_coords)
+        return xyz_coords
 
-        return current_relative_coords
+    def _get_absolute_coords(
+        self,
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Get the x, y, z coordinates for each drone.
 
-    # def _get_absolute_coords(
-    #     self,
-    # ) -> List[Tuple[float, float, float]]:
-    #     """
-    #     Get the x, y, z coordinates for each drone.
+        Args:
+            drones (Dict[int, mavutil.mavlink_connection]): Dictionary of drone connections.
 
-    #     Args:
-    #         drones (Dict[int, mavutil.mavlink_connection]): Dictionary of drone connections.
+        Returns:
+            List[Tuple[float, float, float]]: List of x, y, z coordinates for each drone.
+        """
+        absolute_coords = []
 
-    #     Returns:
-    #         List[Tuple[float, float, float]]: List of x, y, z coordinates for each drone.
-    #     """
-    #     absolute_coords = []
+        for drone in self.vehicles:
+            lat, lon, alt = self._get_drone_coordinates(drone)
+            absolute_coords.append((lat, lon, alt))
 
-    #     for drone in self.vehicles:
-    #         lat, lon, alt = self._get_drone_coordinates(drone)
-    #         absolute_coords.append((lat, lon, alt))
-
-    #     return absolute_coords
+        return absolute_coords
 
     def _get_drone_coordinates(
         self,
@@ -594,43 +533,13 @@ class PyMavlinkHelper:
             Tuple[float, float, float]: The latitude, longitude, and altitude of the drone.
         """
         # Request GPS position
-        msg = None
-        while msg is None:
-            msg = drone.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
-            time.sleep(0.5)
+        msg = try_recv_match(drone, message_name="GLOBAL_POSITION_INT")
         latitude = msg.lat / 1e7
         longitude = msg.lon / 1e7
         altitude = (
             msg.relative_alt / 1000.0
         )  # TODO check if relative_alt is correct for this implementation
-        
         return latitude, longitude, altitude
-
-    def _force_disarm(self, vehicle):
-        """
-        Force disarms the vehicle.
-        """
-        # Send disarm command directly
-        set_parameter(vehicle, "NOT_SAFE_DISARM", 1)
-        vehicle.mav.command_long_send(
-            vehicle.target_system,
-            vehicle.target_component,
-            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-            0,  # Confirmation (set to 0)
-            0,  # Disarm (0 to disarm, 1 to arm)
-            21196,  # Magic number to force disarm
-            0,
-            0,
-            0,
-            0,
-            0,  # Unused parameters
-        )
-
-        # Wait for ACK command
-        if self._ack_msg(vehicle, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM):
-            print("Force disarm command accepted")
-        else:
-            print("Force disarm command failed")
 
     def close_environment(self) -> None:
         """
@@ -651,38 +560,27 @@ class PyMavlinkHelper:
                 0,
                 0,
             )
-            # Wait for ACK command
-            if self._ack_msg(vehicle, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM):
-                if self._check_is_armed()[i] != False:
-                    print(f"Drone {i+1} disarmed")
-                else:
-                    self._force_disarm(vehicle)
-            else:
-                print(f"Failed to disarm drone {i+1}")
-
             vehicle.close()
-
         self.vehicles = []
-        self.is_initialized_env = False
 
     def move(self, coords: List[Tuple[float, float, float]]):
         threads = []
         for i, drone in enumerate(self.vehicles):
             try:
                 print(f"Moving drone {i+1} to {coords[i]}...")
-                t = threading.Thread(target=self._move, args=(drone, coords[i]))
+                t = threading.Thread(
+                    target=self._move, args=(drone, coords[i], self.origin)
+                )
                 threads.append(t)
                 t.start()
             except Exception as e:
                 print(f"Failed to move drone {i+1}: {e}")
 
-        for t in threads:
-            t.join()
-
     def _move(
         self,
         drone: mavutil.mavlink_connection,
         target_coordinates: Tuple[float, float, float],
+        origin: Tuple[float, float, float],
     ) -> None:
         """
         Move a drone to the target coordinates.
@@ -693,7 +591,59 @@ class PyMavlinkHelper:
         """
         x, y, z = target_coordinates
 
-        avg_x, avg_y, avg_z = self.origin[0], self.origin[1], self.origin[2]
+        avg_x, avg_y, avg_z = origin[0], origin[1], origin[2]
         target_x, target_y, target_z = (avg_x + x), (avg_y + y), (avg_z + z)
         lat, lon, alt = xyz_to_lla(target_x, target_y, target_z)
         send_position_target_global_int(drone, lat, lon, alt)
+
+    def _force_disarm(self, vehicle: mavutil.mavlink_connection):
+        """
+        Force disarms the vehicle.
+        """
+        # Send disarm command directly
+        self.set_parameter(vehicle, "MOT_SAFE_DISARM", 1)
+        vehicle.mav.command_long_send(
+            vehicle.target_system,
+            vehicle.target_component,
+            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+            0,  # Confirmation (set to 0)
+            0,  # Disarm (0 to disarm, 1 to arm)
+            21196,  # Magic number to force disarm
+            0,
+            0,
+            0,
+            0,
+            0,  # Unused parameters
+        )
+
+        # Wait for ACK command using try_recv_match
+        ack_msg = try_recv_match(vehicle, "COMMAND_ACK", retries=5, timeout=2)
+
+        if ack_msg and ack_msg.command == mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM:
+            if ack_msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                print("Force disarm command accepted")
+            else:
+                print(f"Force disarm command failed with result: {ack_msg.result}")
+        else:
+            print("Force disarm command failed or no ACK received")
+
+    def _force_disarm_multiple(self, vehicle_indices: list[int]):
+        """
+        Force disarms the drones corresponding to the provided list of vehicle indices using threads.
+
+        Parameters:
+        vehicle_indices (list[int]): List of indices of drones to force disarm.
+        """
+        threads = []
+
+        for i in vehicle_indices:
+            if 0 <= i < len(self.vehicles):
+                vehicle = self.vehicles[i]
+                thread = threading.Thread(target=self._force_disarm, args=(vehicle,))
+                threads.append(thread)
+                thread.start()
+            else:
+                print(f"Index {i} is out of range. Skipping...")
+
+        for thread in threads:
+            thread.join()
