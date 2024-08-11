@@ -218,6 +218,45 @@ class PyMavlinkHelper:
 
         return (avg_x, avg_y, avg_z)
 
+    def _get_relative_position(
+        self, current_positions: List[Tuple[float, float, float]]
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Calculate and return the relative position of each drone from the origin.
+
+        Returns:
+            List[Tuple[float, float, float]]: A list of relative (x, y, z) positions for each drone.
+        """
+        relative_positions = []
+
+        if self.is_initialized_env == True:
+            for i, _ in enumerate(self.vehicles):
+                # Get the current absolute coordinates of the drone
+                # lat, lon, alt = self._get_drone_coordinates(drone)
+
+                # Convert the absolute coordinates to (x, y, z)
+                current_x, current_y, current_z = current_positions[i]
+
+                # Calculate the relative position from the origin
+                relative_x = current_x - self.origin[0]
+                relative_y = current_y - self.origin[1]
+                relative_z = current_z - self.origin[2]
+
+                # Append the relative position to the list
+                relative_positions.append((relative_x, relative_y, relative_z))
+        else:
+            for i, _ in enumerate(self.vehicles):
+                # Get the current absolute coordinates of the drone
+                # lat, lon, alt = self._get_drone_coordinates(drone)
+
+                # Convert the absolute coordinates to (x, y, z)
+                current_x, current_y, current_z = current_positions[i]
+
+                # Append the relative position to the list
+                relative_positions.append((current_x, current_y, current_z))
+
+        return relative_positions
+
     ## TODO this function trying arm and if it is succeded return true. it is not actually checking.
     def _check_is_armed(self) -> List[bool]:
         """
@@ -497,27 +536,30 @@ class PyMavlinkHelper:
             lat, lon, alt = self._get_drone_coordinates(drone)
             x, y, z = lla_to_xyz(lat, lon, alt)
             xyz_coords.append((x, y, z))
-        return xyz_coords
 
-    def _get_absolute_coords(
-        self,
-    ) -> List[Tuple[float, float, float]]:
-        """
-        Get the x, y, z coordinates for each drone.
+        current_relative_coords = self._get_relative_position(xyz_coords)
 
-        Args:
-            drones (Dict[int, mavutil.mavlink_connection]): Dictionary of drone connections.
+        return current_relative_coords
 
-        Returns:
-            List[Tuple[float, float, float]]: List of x, y, z coordinates for each drone.
-        """
-        absolute_coords = []
+    # def _get_absolute_coords(
+    #     self,
+    # ) -> List[Tuple[float, float, float]]:
+    #     """
+    #     Get the x, y, z coordinates for each drone.
 
-        for drone in self.vehicles:
-            lat, lon, alt = self._get_drone_coordinates(drone)
-            absolute_coords.append((lat, lon, alt))
+    #     Args:
+    #         drones (Dict[int, mavutil.mavlink_connection]): Dictionary of drone connections.
 
-        return absolute_coords
+    #     Returns:
+    #         List[Tuple[float, float, float]]: List of x, y, z coordinates for each drone.
+    #     """
+    #     absolute_coords = []
+
+    #     for drone in self.vehicles:
+    #         lat, lon, alt = self._get_drone_coordinates(drone)
+    #         absolute_coords.append((lat, lon, alt))
+
+    #     return absolute_coords
 
     def _get_drone_coordinates(
         self,
@@ -601,7 +643,7 @@ class PyMavlinkHelper:
         Force disarms the vehicle.
         """
         # Send disarm command directly
-        self.set_parameter(vehicle, "MOT_SAFE_DISARM", 1)
+        set_parameter(vehicle, "MOT_SAFE_DISARM", 1)
         vehicle.mav.command_long_send(
             vehicle.target_system,
             vehicle.target_component,
