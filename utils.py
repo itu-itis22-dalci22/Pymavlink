@@ -121,7 +121,7 @@ def calculate_average_coordinates(
     avg_x = sum(coord[0] for coord in xyz_coords) / len(xyz_coords)
     avg_y = sum(coord[1] for coord in xyz_coords) / len(xyz_coords)
     avg_z = sum(coord[2] for coord in xyz_coords) / len(xyz_coords)
-    return (avg_x, avg_y, avg_z)
+    return avg_x, avg_y, avg_z
 
 
 def set_parameter(drone, param_id, param_value):
@@ -152,45 +152,36 @@ def set_parameter(drone, param_id, param_value):
             break
 
 
-def get_attitude(drone):
+def try_recv_match(vehicle, message_name, retries=10, timeout=5):
     """
-    Get the attitude (roll, pitch, yaw) of the drone.
+    Tries to receive a MAVLink message by matching the message name.
 
-    Args:
-        drone (mavutil.mavlink_connection): The MAVLink connection object.
+    Parameters:
+        vehicle: The vehicle object.
+        message_name: The name of the MAVLink message to match.
+        retries: Number of times to retry if no message is received.
+        timeout: Timeout for each recv_match attempt in seconds.
 
     Returns:
-        tuple: Roll, pitch, and yaw angles in degrees.
+        The matched MAVLink message if successful, None otherwise.
     """
-    msg = drone.recv_match(type='ATTITUDE', blocking=True)
-    if msg:
-        roll = msg.roll * 180.0 / 3.14159265
-        pitch = msg.pitch * 180.0 / 3.14159265
-        yaw = msg.yaw * 180.0 / 3.14159265
-        return roll, pitch, yaw
-    return None, None, None
+    print(f"Attempt to receive {message_name} message...")
+    for attempt in range(1, retries + 1):
+        # print(f"Attempt {attempt} to receive {message_name} message...")
+        try:
+            # Try to receive the matched message
+            msg = vehicle.recv_match(type=message_name, blocking=True, timeout=timeout)
+            if msg:
+                # print(f"Received {message_name} message.")
+                return msg  # Return the received message if successful
+        except Exception as e:
+            print(f"Error receiving {message_name}: {str(e)}")
 
+        # If the message was not received, wait a bit before retrying
+        print(
+            f"{message_name} message not received. Retrying after {timeout} seconds..."
+        )
+        time.sleep(timeout)
 
-def display_real_time_attitude(drone):
-    """
-    Display the real-time roll, pitch, and yaw angles of the drone.
-
-    Args:
-        drone (mavutil.mavlink_connection): The MAVLink connection object.
-    """
-    print("Displaying real-time roll, pitch, and yaw angles...")
-    try:
-        while True:
-            roll, pitch, yaw = get_attitude(drone)
-            if roll is not None:
-                print(f"Roll: {roll:.2f}°, Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        print("Exiting real-time attitude display.")
-        
-        
-# def main():
-#     xyz_cords, avg_x, avg_y, avg_z = connect_drones()
-    
-#     for drone in drones:
-#         display_real_time_attitude(drone)
+    print(f"Failed to receive {message_name} message after {retries} attempts.")
+    return None  # Return None if all attempts fail
