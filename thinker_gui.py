@@ -4,6 +4,7 @@ from pymavlink import mavutil
 from threading import Thread
 import serial.tools.list_ports
 from pymavlink_helper import PyMavlinkHelper
+import time
 
 
 def list_serial_ports():
@@ -147,26 +148,30 @@ class DroneControlApp:
             coords = tuple(map(float, move_str.split(",")))
             if len(coords) != 3:
                 raise ValueError("Must provide exactly three coordinates (x, y, z)")
-            Thread(
-                target=self.drone_helper._move,
-                args=(
+
+            def move_and_monitor():
+                # Start the movement in a separate thread
+                self.drone_helper._move(
                     self.drone_helper.vehicles[drone_index],
                     coords,
                     self.drone_helper.origin,
-                ),
-            ).start()
+                )
+                # Continuously print the current coordinates every second
+                while True:
+                    current_coords = self.drone_helper.get_current_state()[drone_index]
+                    print(
+                        f"Drone {drone_index+1} current coordinates: {current_coords}"
+                    )
+                    time.sleep(1)
+
+            Thread(target=move_and_monitor).start()
+
         except ValueError:
             messagebox.showerror(
                 "Error", "Invalid coordinates. Please provide in the format x,y,z"
             )
         except Exception as e:
             messagebox.showerror("Error", f"Failed to move drone {drone_index+1}: {e}")
-
-    def land_drone(self, drone_index):
-        try:
-            Thread(target=self.drone_helper._land_drone, args=(drone_index,)).start()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to land drone {drone_index+1}: {e}")
 
 
 if __name__ == "__main__":
