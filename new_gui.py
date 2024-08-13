@@ -5,6 +5,7 @@ from threading import Thread
 import serial.tools.list_ports
 from pymavlink_helper import PyMavlinkHelper
 import time
+from typing import Tuple, List, Dict
 
 
 def list_serial_ports():
@@ -68,7 +69,7 @@ class DroneControlApp:
         self.drone_frames = []
         self.takeoff_entries = []
         self.move_entries = []
-        self.arm_status_labels = []  # Arm durumlarını göstermek için etiketler
+        self.arm_status_labels = []
 
         for i in range(self.drone_helper.drone_count):
             frame = tk.Frame(root, padx=10, pady=10, borderwidth=2, relief="ridge")
@@ -76,17 +77,13 @@ class DroneControlApp:
 
             tk.Label(frame, text=f"Drone {i+1}").pack()
 
-            # Arm button
             tk.Button(frame, text="Arm", command=lambda i=i: self.arm_drone(i)).pack(
                 pady=5
             )
-
-            # Disarm button
             tk.Button(
                 frame, text="Disarm", command=lambda i=i: self.disarm_drone(i)
             ).pack(pady=5)
 
-            # Takeoff button
             tk.Label(frame, text="Takeoff Altitude (m)").pack()
             takeoff_entry = tk.Entry(frame)
             takeoff_entry.pack(pady=5)
@@ -95,7 +92,6 @@ class DroneControlApp:
                 frame, text="Takeoff", command=lambda i=i: self.takeoff_drone(i)
             ).pack(pady=5)
 
-            # Move button
             tk.Label(frame, text="Move to (x,y,z)").pack()
             move_entry = tk.Entry(frame)
             move_entry.pack(pady=5)
@@ -104,21 +100,30 @@ class DroneControlApp:
                 pady=5
             )
 
-            # Land button
             tk.Button(frame, text="Land", command=lambda i=i: self.land_drone(i)).pack(
                 pady=5
             )
 
-            # Arm Status Label
             arm_status_label = tk.Label(frame, text="Arm Status: Unknown")
             arm_status_label.pack(pady=5)
             self.arm_status_labels.append(arm_status_label)
 
             self.drone_frames.append(frame)
 
-        # Check Arm Status button
         tk.Button(root, text="Check Arm Status", command=self.check_arm_status).grid(
             row=1, column=0, columnspan=self.drone_helper.drone_count, pady=10
+        )
+
+        # Swarm Move Entry and Button
+        tk.Label(root, text="Swarm Move Offset (x,y,z)").grid(
+            row=2, column=0, columnspan=self.drone_helper.drone_count
+        )
+        self.swarm_move_entry = tk.Entry(root)
+        self.swarm_move_entry.grid(
+            row=3, column=0, columnspan=self.drone_helper.drone_count, pady=5
+        )
+        tk.Button(root, text="Swarm Move", command=self.swarm_move_drones).grid(
+            row=4, column=0, columnspan=self.drone_helper.drone_count, pady=10
         )
 
     def arm_drone(self, drone_index):
@@ -184,6 +189,20 @@ class DroneControlApp:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to move drone {drone_index+1}: {e}")
 
+    def swarm_move_drones(self):
+        move_str = self.swarm_move_entry.get()
+        try:
+            coords = tuple(map(float, move_str.split(",")))
+            if len(coords) != 3:
+                raise ValueError("Must provide exactly three coordinates (x, y, z)")
+            self.swarm_move(coords)
+        except ValueError:
+            messagebox.showerror(
+                "Error", "Invalid coordinates. Please provide in the format x,y,z"
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to execute swarm move: {e}")
+
     def land_drone(self, drone_index):
         try:
             Thread(target=self.drone_helper._land_drone, args=(drone_index,)).start()
@@ -213,6 +232,7 @@ if __name__ == "__main__":
         )
         drone_helper.initialize_environment()
         app = DroneControlApp(root, drone_helper)
+
         root.mainloop()
     else:
         messagebox.showerror(

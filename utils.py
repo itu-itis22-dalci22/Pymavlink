@@ -185,3 +185,6 @@ def try_recv_match(vehicle, message_name, retries=10, timeout=5):
 
     print(f"Failed to receive {message_name} message after {retries} attempts.")
     return None  # Return None if all attempts fail
+
+
+##TODO Dislay pitch, roll, yaw functions

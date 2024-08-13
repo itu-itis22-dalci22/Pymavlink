@@ -746,6 +746,33 @@ class PyMavlinkHelper:
             vehicle.close()
         self.vehicles = []
 
+    def swarm_move(self, offset: Tuple[float, float, float]):
+        current_positions = self.get_current_state()
+        new_targets = []
+
+        # Calculate new target coordinates for each drone
+        for position in current_positions:
+            new_x = position[0] + offset[0]
+            new_y = position[1] + offset[1]
+            new_z = position[2] + offset[2]
+            new_targets.append((new_x, new_y, new_z))
+
+        # Move all drones to their new target coordinates simultaneously
+        threads = []
+        for i, drone in enumerate(self.vehicles):
+            try:
+                t = threading.Thread(
+                    target=self._move, args=(drone, new_targets[i], self.origin)
+                )
+                threads.append(t)
+                t.start()
+            except Exception as e:
+                print(f"Failed to move drone {i+1}: {e}")
+
+        # Ensure all threads have completed
+        for t in threads:
+            t.join()
+
     def move(self, coords: List[Tuple[float, float, float]]):
         threads = []
         for i, drone in enumerate(self.vehicles):
