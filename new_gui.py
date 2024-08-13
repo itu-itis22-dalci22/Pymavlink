@@ -70,6 +70,7 @@ class DroneControlApp:
         self.takeoff_entries = []
         self.move_entries = []
         self.arm_status_labels = []
+        self.coord_labels = []  # Labels for displaying drone coordinates
 
         for i in range(self.drone_helper.drone_count):
             frame = tk.Frame(root, padx=10, pady=10, borderwidth=2, relief="ridge")
@@ -108,6 +109,11 @@ class DroneControlApp:
             arm_status_label.pack(pady=5)
             self.arm_status_labels.append(arm_status_label)
 
+            # Add a label for displaying coordinates
+            coord_label = tk.Label(frame, text="Coordinates: Unknown")
+            coord_label.pack(pady=5)
+            self.coord_labels.append(coord_label)
+
             self.drone_frames.append(frame)
 
         tk.Button(root, text="Check Arm Status", command=self.check_arm_status).grid(
@@ -125,6 +131,15 @@ class DroneControlApp:
         tk.Button(root, text="Swarm Move", command=self.swarm_move_drones).grid(
             row=4, column=0, columnspan=self.drone_helper.drone_count, pady=10
         )
+
+        # Start updating drone coordinates
+        self.update_coords()
+
+    def update_coords(self):
+        for i, coord_label in enumerate(self.coord_labels):
+            current_coords = self.drone_helper.get_current_state()[i]
+            coord_label.config(text=f"Coordinates: {current_coords}")
+        self.root.after(1000, self.update_coords)  # Update every 1 second
 
     def arm_drone(self, drone_index):
         try:
