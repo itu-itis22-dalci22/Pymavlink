@@ -141,8 +141,8 @@ class PyMavlinkHelper:
         Connects to all drones using the provided connection strings and baud rate.
 
         This method establishes connections to the drones, sets each drone to the "LOITER"
-        flight mode, and initializes the logging thread. It also calculates the average
-        coordinates of the drones' initial positions to set the origin point.
+        flight mode, requests data streams, and initializes the logging thread. It also calculates
+        the average coordinates of the drones' initial positions to set the origin point.
 
         Raises
         ------
@@ -158,6 +158,10 @@ class PyMavlinkHelper:
             )
             vehicle.wait_heartbeat()
             self.vehicles.append(vehicle)
+
+            # Request data stream to improve connection reliability
+            self.request_data_stream(vehicle)
+
             time.sleep(0.1)
             self._set_mode(vehicle, "LOITER")
 
@@ -173,6 +177,23 @@ class PyMavlinkHelper:
 
         print("All vehicles connected.")
         print(f"Origin is {self.origin}")
+
+    def request_data_stream(self, drone, rate=1):
+        """
+        Requests a data stream from the drone at the specified rate.
+
+        Args:
+            drone (mavutil.mavlink_connection): The drone connection.
+            rate (int): The rate at which to request data streams (Hz). Default is 1 Hz.
+        """
+        drone.mav.request_data_stream_send(
+            drone.target_system,
+            drone.target_component,
+            mavutil.mavlink.MAV_DATA_STREAM_ALL,
+            rate,
+            1,
+        )
+        print("Requested data stream")
 
     def _log_flight(self):
         """
