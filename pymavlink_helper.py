@@ -10,6 +10,7 @@ from utils import (
     send_position_target_global_int,
     set_parameter,
     try_recv_match,
+    request_global_position,
 )
 import math
 import csv
@@ -76,7 +77,9 @@ class PyMavlinkHelper:
         self.vehicles = []
         self.is_initialized_env = False
 
-    def _set_mode(self, drone: mavutil.mavlink_connection, mode: str) -> None:
+    def _set_mode(
+        self, drone: mavutil.mavlink_connection, mode: str
+    ) -> None:  ##TODO this function can be moved to utils.py
         """
         Sets the flight mode of the drone.
 
@@ -153,17 +156,18 @@ class PyMavlinkHelper:
             print(
                 f"Connecting to vehicle {i+1} on: {self.connection_strings[i]} with baud rate: {self.baud_rate}"
             )
-            vehicle = mavutil.mavlink_connection(
-                self.connection_strings[i], baud=self.baud_rate
-            )
-            vehicle.wait_heartbeat()
-            self.vehicles.append(vehicle)
-
-            # Request data stream to improve connection reliability
-            self.request_data_stream(vehicle)
-
-            time.sleep(0.1)
-            self._set_mode(vehicle, "LOITER")
+            try:
+                vehicle = mavutil.mavlink_connection(
+                    self.connection_strings[i], baud=self.baud_rate, timeout=30
+                )  ##TODO thread ile bağlanmayı deneyelim
+                vehicle.wait_heartbeat()
+                print(f"Drone {i+1} connected")
+                request_global_position(vehicle, rate=10)
+                time.sleep(0.5)
+                self._set_mode(vehicle, "LOITER")
+                self.vehicles.append(vehicle)
+            except Exception as e:
+                raise ConnectionError(f"Failed to connect to drone {i+1}: {e}")
 
         initial_coords = []
         for drone_index, _ in enumerate(self.vehicles):
@@ -178,13 +182,15 @@ class PyMavlinkHelper:
         print("All vehicles connected.")
         print(f"Origin is {self.origin}")
 
-    def request_data_stream(self, drone, rate=1):
+    def request_data_stream(
+        self, drone, rate=2
+    ):  ##TODO this function can be moved to utils.py
         """
         Requests a data stream from the drone at the specified rate.
 
         Args:
             drone (mavutil.mavlink_connection): The drone connection.
-            rate (int): The rate at which to request data streams (Hz). Default is 1 Hz.
+            rate (int): The rate at which to request data streams (Hz). Default is 2 Hz.
         """
         drone.mav.request_data_stream_send(
             drone.target_system,
@@ -194,6 +200,97 @@ class PyMavlinkHelper:
             1,
         )
         print("Requested data stream")
+
+    def _get_smoothed_location(
+        self,
+        drone_index: int,
+        sampling_duration: float = 10.0,
+        sample_interval: float = 0.1,
+    ) -> Tuple[float, float, float]:
+        """
+        Get the smoothed location by averaging the x, y, and z coordinates of a drone,
+        while excluding outliers based on their deviation from the mean standard deviations.
+
+        This function collects multiple samples of the drone's coordinates over a specified duration,
+        calculates the mean and standard deviation for the x, y, and z coordinates, and excludes
+        any outliers that deviate beyond a set threshold. The final smoothed location is the average
+        of the remaining valid samples.
+
+        Parameters
+        ----------
+        drone_index : int
+            The index of the drone in the vehicles list whose location is to be smoothed.
+        sampling_duration : float
+            The total duration in seconds to collect samples.
+        sample_interval : float
+            The interval in seconds between each sample.
+
+        Returns
+        -------
+        Tuple[float, float, float]
+            The smoothed (x, y, z) coordinates of the selected drone.
+
+        Raises
+        ------
+        IndexError
+            If the drone_index is out of bounds of the vehicles list.
+        """
+        xs = []
+        ys = []
+        zs = []
+        deviation_threshold = 2.0
+
+        # Collect data over the sampling duration
+        end_time = time.time() + sampling_duration
+        while time.time() < end_time:
+            x, y, z = self.get_current_state()[drone_index]
+            xs.append(x)
+            ys.append(y)
+            zs.append(z)
+            time.sleep(sample_interval)  # Short delay between samples
+
+        num_samples = len(xs)  # Update num_samples based on collected data
+
+        if num_samples == 0:
+            return (0.0, 0.0, 0.0)  # Handle no samples case
+
+        # Compute mean
+        x_mean = sum(xs) / num_samples
+        y_mean = sum(ys) / num_samples
+        z_mean = sum(zs) / num_samples
+
+        # Calculate 2D Euclidean distances from the mean
+        distances = []
+        for x, y in zip(xs, ys):
+            distance = math.sqrt((x - x_mean) ** 2 + (y - y_mean) ** 2)
+            distances.append(distance)
+
+        # Calculate standard deviation of distances
+        mean_distance = sum(distances) / num_samples
+        xy_std = math.sqrt(
+            sum((d - mean_distance) ** 2 for d in distances) / (num_samples - 1)
+        )
+        z_std = math.sqrt(sum((z - z_mean) ** 2 for z in zs) / (num_samples - 1))
+
+        # Calculate valid indices
+        valid_indices = [
+            (
+                distances[i] <= deviation_threshold * xy_std
+                and abs(zs[i] - z_mean) <= deviation_threshold * z_std
+            )
+            for i in range(num_samples)
+        ]
+
+        valid_xs = [xs[i] for i in range(num_samples) if valid_indices[i]]
+        valid_ys = [ys[i] for i in range(num_samples) if valid_indices[i]]
+        valid_zs = [zs[i] for i in range(num_samples) if valid_indices[i]]
+
+        # Compute average of valid data
+        avg_x = sum(valid_xs) / len(valid_xs) if valid_xs else x_mean
+        avg_y = sum(valid_ys) / len(valid_ys) if valid_ys else y_mean
+        avg_z = sum(valid_zs) / len(valid_zs) if valid_zs else z_mean
+
+        return (avg_x, avg_y, avg_z)
 
     def _log_flight(self):
         """
@@ -273,83 +370,6 @@ class PyMavlinkHelper:
 
         except IOError as e:
             print(f"IOError while logging flight data: {e}")
-
-    def _get_smoothed_location(self, drone_index: int) -> Tuple[float, float, float]:
-        """
-        Get the smoothed location by averaging the x, y, and z coordinates of a drone,
-        while excluding outliers based on their deviation from the mean standard deviations.
-
-        This function collects multiple samples of the drone's coordinates, calculates the mean
-        and standard deviation for the x, y, and z coordinates, and excludes any outliers that
-        deviate beyond a set threshold. The final smoothed location is the average of the
-        remaining valid samples.
-
-        Parameters
-        ----------
-        drone_index : int
-            The index of the drone in the vehicles list whose location is to be smoothed.
-
-        Returns
-        -------
-        Tuple[float, float, float]
-            The smoothed (x, y, z) coordinates of the selected drone.
-
-        Raises
-        ------
-        IndexError
-            If the drone_index is out of bounds of the vehicles list.
-        """
-        xs = []
-        ys = []
-        zs = []
-        num_samples = 100
-        deviation_threshold = 2.0
-
-        # Collect data
-        for _ in range(num_samples):
-            x, y, z = self.get_current_state()[drone_index]
-            xs.append(x)
-            ys.append(y)
-            zs.append(z)
-            time.sleep(0.1)  # Short delay
-
-        # Compute mean
-        x_mean = sum(xs) / num_samples
-        y_mean = sum(ys) / num_samples
-        z_mean = sum(zs) / num_samples
-
-        # Calculate 2D Euclidean distances from the mean
-        distances = []
-        for x, y in zip(xs, ys):
-            distance = math.sqrt((x - x_mean) ** 2 + (y - y_mean) ** 2)
-            distances.append(distance)
-
-        # Calculate standard deviation of distances
-        mean_distance = sum(distances) / num_samples
-        xy_std = math.sqrt(
-            sum((d - mean_distance) ** 2 for d in distances) / (num_samples - 1)
-        )
-        z_std = math.sqrt(sum((z - z_mean) ** 2 for z in zs) / (num_samples - 1))
-
-        # Calculate valid indices
-        valid_indices = [
-            (
-                distances[i] <= deviation_threshold * xy_std
-                and abs(zs[i] - z_mean) <= deviation_threshold * z_std
-            )
-            for i in range(num_samples)
-        ]
-
-        valid_xs = [xs[i] for i in range(num_samples) if valid_indices[i]]
-        valid_ys = [ys[i] for i in range(num_samples) if valid_indices[i]]
-        valid_zs = [zs[i] for i in range(num_samples) if valid_indices[i]]
-
-        # Compute average of valid data
-        avg_x = sum(valid_xs) / len(valid_xs) if valid_xs else x_mean
-        avg_y = sum(valid_ys) / len(valid_ys) if valid_ys else y_mean
-        avg_z = sum(valid_zs) / len(valid_zs) if valid_zs else z_mean
-
-        return (avg_x, avg_y, avg_z)
 
     def _get_relative_position(
         self, current_positions: List[Tuple[float, float, float]]
@@ -548,6 +568,7 @@ class PyMavlinkHelper:
         )
 
         # Wait until the drone reaches the target altitude
+
         while True:
             msg = try_recv_match(drone, message_name="GLOBAL_POSITION_INT")
             altitude = msg.relative_alt / 1000.0  # altitude in meters
@@ -767,33 +788,6 @@ class PyMavlinkHelper:
             vehicle.close()
         self.vehicles = []
 
-    def swarm_move(self, offset: Tuple[float, float, float]):
-        current_positions = self.get_current_state()
-        new_targets = []
-
-        # Calculate new target coordinates for each drone
-        for position in current_positions:
-            new_x = position[0] + offset[0]
-            new_y = position[1] + offset[1]
-            new_z = position[2] + offset[2]
-            new_targets.append((new_x, new_y, new_z))
-
-        # Move all drones to their new target coordinates simultaneously
-        threads = []
-        for i, drone in enumerate(self.vehicles):
-            try:
-                t = threading.Thread(
-                    target=self._move, args=(drone, new_targets[i], self.origin)
-                )
-                threads.append(t)
-                t.start()
-            except Exception as e:
-                print(f"Failed to move drone {i+1}: {e}")
-
-        # Ensure all threads have completed
-        for t in threads:
-            t.join()
-
     def move(self, coords: List[Tuple[float, float, float]]):
         threads = []
         for i, drone in enumerate(self.vehicles):
@@ -811,7 +805,6 @@ class PyMavlinkHelper:
         self,
         drone: mavutil.mavlink_connection,
         target_coordinates: Tuple[float, float, float],
-        origin: Tuple[float, float, float],
     ) -> None:
         """
         Move a drone to the target coordinates.
@@ -822,10 +815,48 @@ class PyMavlinkHelper:
         """
         x, y, z = target_coordinates
 
-        avg_x, avg_y, avg_z = origin[0], origin[1], origin[2]
+        avg_x, avg_y, avg_z = self.origin[0], self.origin[1], self.origin[2]
         target_x, target_y, target_z = (avg_x + x), (avg_y + y), (avg_z + z)
         lat, lon, alt = xyz_to_lla(target_x, target_y, target_z)
         send_position_target_global_int(drone, lat, lon, alt)
+
+    def swarm_move(self, coord: Tuple[float, float, float]):
+
+        current_positions = self.get_current_state()
+        new_targets = []
+        curr_center = calculate_average_coordinates(current_positions)
+
+        offset = (
+            coord[0] - curr_center[0],
+            coord[1] - curr_center[1],
+            coord[2] - curr_center[2],
+        )
+        # Calculate new target coordinates for each drone
+        for position in current_positions:
+            new_x = position[0] + offset[0]
+            new_y = position[1] + offset[1]
+            new_z = position[2] + offset[2]
+            new_targets.append((new_x, new_y, new_z))
+
+        # Move all drones to their new target coordinates simultaneously
+        threads = []
+        for i, drone in enumerate(self.vehicles):
+            try:
+                t = threading.Thread(
+                    target=self._move,
+                    args=(
+                        drone,
+                        new_targets[i],
+                    ),
+                )
+                threads.append(t)
+                t.start()
+            except Exception as e:
+                print(f"Failed to move drone {i+1}: {e}")
+
+        # Ensure all threads have completed
+        for t in threads:
+            t.join()
 
     def _force_disarm(self, vehicle: mavutil.mavlink_connection):
         """

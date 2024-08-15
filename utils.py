@@ -165,14 +165,14 @@ def try_recv_match(vehicle, message_name, retries=10, timeout=5):
     Returns:
         The matched MAVLink message if successful, None otherwise.
     """
-    print(f"Attempt to receive {message_name} message...")
+    # print(f"Attempt to receive {message_name} message...")
     for attempt in range(1, retries + 1):
         # print(f"Attempt {attempt} to receive {message_name} message...")
         try:
             # Try to receive the matched message
             msg = vehicle.recv_match(type=message_name, blocking=True, timeout=timeout)
             if msg:
-                # print(f"Received {message_name} message.")
+                print(f"Received {message_name} message.")
                 return msg  # Return the received message if successful
         except Exception as e:
             print(f"Error receiving {message_name}: {str(e)}")
@@ -185,6 +185,24 @@ def try_recv_match(vehicle, message_name, retries=10, timeout=5):
 
     print(f"Failed to receive {message_name} message after {retries} attempts.")
     return None  # Return None if all attempts fail
+
+
+def request_global_position(drone, rate=2):
+    """
+    Requests the GLOBAL_POSITION_INT data stream at a specified rate.
+
+    Args:
+        drone (mavutil.mavlink_connection): The drone connection.
+        rate (int): The rate at which to request the data stream (Hz). Default is 1 Hz.
+    """
+    drone.mav.request_data_stream_send(
+        drone.target_system,
+        drone.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+        rate,
+        1,  # Enable the stream
+    )
+    print(f"Requested GLOBAL_POSITION_INT data stream at {rate} Hz")
 
 
 ##TODO Dislay pitch, roll, yaw functions
